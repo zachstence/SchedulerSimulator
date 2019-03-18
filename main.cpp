@@ -3,6 +3,9 @@
 #include <vector>
 #include <queue>
 #include <cmath>
+#include <algorithm>
+
+#include "EventQueue.h"
 
 using std::string;
 using std::to_string;
@@ -14,56 +17,33 @@ using std::stod;
 using std::vector;
 using std::priority_queue;
 using std::queue;
+using std::find;
 
-struct Process {
-    int id;
-    double arrivalTime;
-    double completionTime;
-    double serviceTime;
-    double serviceTimeLeft;
-};
-
-enum EventType {
-    ARRIVAL, DEPARTURE, TIMEOUT, QUERY
-};
-
-struct Event {
-    double time;
-    Process* process;
-    EventType type;
-
-    bool operator<(const Event& other) const {
-        return this->time > other.time;
-    }
-};
 
 struct Statistics {
     double avgTurnaroundTime;
     double throughput;
     double avgCpuUtil;
     double avgReadyQueueSize;
+
+    void display() {
+        printf("Avg. Turnaround Time : %6.3f\n"
+               "          Throughput : %6.3f\n"
+               "       Avg. CPU Util : %6.3f\n"
+               " Avg. in Ready Queue : %6.3f\n",
+               this->avgTurnaroundTime, this->throughput, this->avgCpuUtil, this->avgReadyQueueSize
+        );
+    }
 };
+
 
 double inversePoisson(double rate) {
     double y = (double) rand() / RAND_MAX;
     return -1 * log(1 - y) / rate;
 }
 
-void scheduleEvent(priority_queue<Event> &eventQueue, double time, Process* p, EventType type) {
-    eventQueue.push({time, p, type});
-}
-
-void printStatistics(Statistics s) {
-    printf("Avg. Turnaround Time : %6.3f\n"
-           "          Throughput : %6.3f\n"
-           "       Avg. CPU Util : %6.3f\n"
-           " Avg. in Ready Queue : %6.3f\n",
-           s.avgTurnaroundTime, s.throughput, s.avgCpuUtil, s.avgReadyQueueSize
-    );
-}
-
 Statistics simulateFCFS(int numProcesses, double arrivalRate, double serviceTime, double queryInterval) {
-    priority_queue<Event> eventQueue;
+    EventQueue eventQueue;
     queue<Process*> readyQueue;
     vector<Process*> processes;
 
@@ -71,13 +51,12 @@ Statistics simulateFCFS(int numProcesses, double arrivalRate, double serviceTime
     bool cpuIdle = true;
 
     // Schedule first process arrival
-    double t = inversePoisson(1 / serviceTime);
-    auto firstProcess = new Process {0, clock, -1, t, t};
+    auto firstProcess = new Process(0, 0, inversePoisson(1 / serviceTime));
     processes.push_back(firstProcess);
-    scheduleEvent(eventQueue, clock, firstProcess, ARRIVAL);
+    eventQueue.scheduleEvent(clock, firstProcess, ARRIVAL);
 
     // Schedule first query event
-    scheduleEvent(eventQueue, clock, {}, QUERY);
+    eventQueue.scheduleEvent(clock + queryInterval, nullptr, QUERY);
 
     int processesSimulated = 0;
     double cpuIdleTime = 0;
@@ -86,8 +65,7 @@ Statistics simulateFCFS(int numProcesses, double arrivalRate, double serviceTime
 
     while (processesSimulated < numProcesses && !eventQueue.empty()) {
 
-        Event current = eventQueue.top();
-        eventQueue.pop();
+        Event current = eventQueue.getEvent();
         clock = current.time;
 
         // If arrival event
@@ -96,27 +74,26 @@ Statistics simulateFCFS(int numProcesses, double arrivalRate, double serviceTime
             if (cpuIdle) {
                 cpuIdle = false;
                 cpuIdleTime += clock - lastCpuBusyTime;
-                scheduleEvent(eventQueue, clock + current.process->serviceTime, current.process, DEPARTURE);
+                eventQueue.scheduleEvent(clock + current.process->getServiceTime(), current.process, DEPARTURE);
             }
-            // If CPU is not idle, add arriving event to ready queue
+                // If CPU is not idle, add arriving event to ready queue
             else {
                 readyQueue.push(current.process);
             }
 
             // Schedule next event's arrival
-            int nextId = current.process->id + 1;
-            double nextTime = clock + inversePoisson(arrivalRate);
-            double service = inversePoisson(1 / serviceTime);
-            auto nextArrival = new Process {nextId, nextTime, -1, service, service};
+            int nextId = current.process->getId() + 1;
+            double nextArrivalTime = clock + inversePoisson(arrivalRate);
+            auto nextArrival = new Process(nextId, nextArrivalTime, inversePoisson(1 / serviceTime));
             processes.push_back(nextArrival);
-            scheduleEvent(eventQueue, nextTime, nextArrival, ARRIVAL);
+            eventQueue.scheduleEvent(nextArrivalTime, nextArrival, ARRIVAL);
         }
 
         // If departure event
         else if (current.type == DEPARTURE) {
             // Increment number of processes simulated at each departure
             processesSimulated++;
-            current.process->completionTime = clock;
+            current.process->setCompletionTime(clock);
 
             // If ready queue is empty, set CPU to idle
             if (readyQueue.empty()) {
@@ -127,24 +104,23 @@ Statistics simulateFCFS(int numProcesses, double arrivalRate, double serviceTime
             // departure
             else {
                 Process* p = readyQueue.front();
-                cpuIdle = false;
                 readyQueue.pop();
-                scheduleEvent(eventQueue, clock + p->serviceTime, p, DEPARTURE);
+                cpuIdle = false;
+                eventQueue.scheduleEvent(clock + p->getServiceTime(), p, DEPARTURE);
             }
         }
 
         else if (current.type == QUERY) {
             totalInReadyQueue += readyQueue.size();
-            scheduleEvent(eventQueue, clock + queryInterval, {}, QUERY);
+            eventQueue.scheduleEvent(clock + queryInterval, nullptr, QUERY);
         }
-
     }
 
     // Sum turnaround times for statistics
     double totalTurnaroundTime = 0;
     for (auto process : processes) {
-        if (process->completionTime == -1) continue;
-        double turnaround = process->completionTime - process->arrivalTime;
+        if (process->getCompletionTime() == -1) continue;
+        double turnaround = process->getCompletionTime() - process->getArrivalTime();
         totalTurnaroundTime += turnaround;
     }
 
@@ -157,38 +133,28 @@ Statistics simulateFCFS(int numProcesses, double arrivalRate, double serviceTime
 }
 
 class SRTFComparator {
+public:
     bool operator()(Process* p1, Process* p2) {
-        return p1->serviceTimeLeft < p2->serviceTimeLeft;
+        return p1->getServiceTimeLeft() < p2->getServiceTimeLeft();
     }
 };
 
 Statistics simulateSRTF(int numProcesses, double arrivalRate, double serviceTime, double queryInterval) {
-    priority_queue<Event> eventQueue;
+    EventQueue eventQueue;
     priority_queue<Process*, vector<Process*>, SRTFComparator> readyQueue;
     vector<Process*> processes;
+    Process* onCpu;
 
-    Process p0 {0, 0, -1, 5, 5};
-    Process p1 {1, 3, -1, 6, 6};
-    Process p2 {2, 2, -1, 3, 4};
-    processes.push_back(&p0);
-    processes.push_back(&p1);
-    processes.push_back(&p2);
-
-    for (auto p : processes) {
-        cout << p->id << " " << p->serviceTimeLeft << endl;
-    }
-
-/*    double clock = 0;
+    double clock = 0;
     bool cpuIdle = true;
 
     // Schedule first process arrival
-    double t = inversePoisson(1 / serviceTime);
-    auto firstProcess = new Process {0, clock, -1, t, t};
+    auto firstProcess = new Process(0, 0, inversePoisson(1 / serviceTime));
     processes.push_back(firstProcess);
-    scheduleEvent(eventQueue, clock, firstProcess, ARRIVAL);
+    eventQueue.scheduleEvent(clock, firstProcess, ARRIVAL);
 
     // Schedule first query event
-    scheduleEvent(eventQueue, clock, {}, QUERY);
+    eventQueue.scheduleEvent(clock, nullptr, QUERY);
 
     int processesSimulated = 0;
     double cpuIdleTime = 0;
@@ -197,23 +163,83 @@ Statistics simulateSRTF(int numProcesses, double arrivalRate, double serviceTime
 
     while (processesSimulated < numProcesses && !eventQueue.empty()) {
 
-        Event current = eventQueue.top();
-        eventQueue.pop();
+        Event current = eventQueue.getEvent();
         clock = current.time;
 
         // If arrival event
         if (current.type == ARRIVAL) {
-            // If CPU is idle, let arriving event use CPU
+            // If CPU is idle, let arriving event use CPU and schedule tentative departure
             if (cpuIdle) {
                 cpuIdle = false;
+                current.process->setLastTimeOnCpu(clock);
                 cpuIdleTime += clock - lastCpuBusyTime;
+                eventQueue.scheduleEvent(clock + current.process->getServiceTimeLeft(), current.process, DEPARTURE);
+                onCpu = current.process;
             }
-            // If CPU is not idle, add arriving event to ready queue
-            else {
+            // If CPU is busy, check for preemption
+            // Preemption process:
+            //   - Update onCpu remaining time
+            //   - Delete tentative departure of onCpu
+            //   - Put onCpu in ready queue
+            //   - Put front of ready queue on CPU
+            //   - Schedule new tentative departure
+            else if (current.process->getServiceTimeLeft() < onCpu->getServiceTimeLeft()) {
+                onCpu->decreaseServiceTimeLeft(clock - onCpu->getLastTimeOnCpu());
+                bool success = eventQueue.unscheduleDeparture(onCpu->getId());
+                if (!success) printf("Scheduling error! Couldn't remove tentative departure!"); // TODO remove later?
+                readyQueue.push(onCpu);
+                onCpu = readyQueue.top();
+                readyQueue.pop();
+                eventQueue.scheduleEvent(clock + onCpu->getServiceTimeLeft(), onCpu, DEPARTURE);
+            }
 
+            // Schedule next arrival
+            int nextId = current.process->getId() + 1;
+            double nextArrivalTime = clock + inversePoisson(arrivalRate);
+            auto nextArrival = new Process(nextId, nextArrivalTime, inversePoisson(1 / serviceTime));
+            processes.push_back(nextArrival);
+            eventQueue.scheduleEvent(nextArrivalTime, nextArrival, ARRIVAL);
+        }
+        // If departure event
+        else if (current.type == DEPARTURE) {
+            // Increment number of processes simulated at each departure
+            processesSimulated++;
+            current.process->setCompletionTime(clock);
+
+            // If ready queue is empty, set CPU to idle
+            if (readyQueue.empty()) {
+                cpuIdle = true;
+                lastCpuBusyTime = clock;
+            }
+            // If ready queue is not empty, put next process from ready queue on CPU
+            // and schedule its tentative departure
+            else {
+                Process* p = readyQueue.top();
+                readyQueue.pop();
+                cpuIdle = false;
+                eventQueue.scheduleEvent(clock + p->getServiceTimeLeft(), p, DEPARTURE);
             }
         }
-    }*/
+        else if (current.type == QUERY) {
+            totalInReadyQueue += readyQueue.size();
+            eventQueue.scheduleEvent(clock + queryInterval, nullptr, QUERY);
+        }
+    }
+
+    // Sum turnaround times for statistics
+    double totalTurnaroundTime = 0;
+    for (auto process : processes) {
+        if (process->getCompletionTime() == -1) continue;
+        double turnaround = process->getCompletionTime() - process->getArrivalTime();
+        totalTurnaroundTime += turnaround;
+    }
+
+    double avgTurnaroundTime = totalTurnaroundTime / numProcesses;
+    double throughput = processesSimulated / clock;
+    double avgCpuUtil = 1 - (cpuIdleTime / clock);
+    double avgReadyQueueSize = (double) totalInReadyQueue / (clock / queryInterval);
+
+    return {avgTurnaroundTime, throughput, avgCpuUtil, avgReadyQueueSize};
 }
 
 Statistics simulateHRRN(int numProcesses, double arrivalRate, double serviceTime, double queryInterval) {
@@ -224,8 +250,6 @@ Statistics simulateRR(int numProcesses, double arrivalRate, double serviceTime, 
 
 }
 
-
-// TODO run all simulations and save output in CSV to make graphs in spreadsheet
 void runAllSimulations() {
 
     double arrivalRates[] {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15,
@@ -315,7 +339,7 @@ int main(int argc, char* argv[]) {
                 break;
         }
 
-        printStatistics(s);
+        s.display();
 
         return 0;
 
