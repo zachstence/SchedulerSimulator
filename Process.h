@@ -13,21 +13,18 @@ private:
     double arrivalTime;
     double serviceTime;
 
+    double waitTime;
     double lastTimeAssignedCpu;
     double serviceTimeLeft;
     double completionTime;
 
 public:
-    Process() {
-        this->id = -1;
-        this->arrivalTime = -1;
-        this->serviceTime = -1;
-    }
     Process(int id, double arrivalTime, double serviceTime) {
         this->id = id;
         this->arrivalTime = arrivalTime;
         this->serviceTime = serviceTime;
 
+        this->waitTime = 0;
         this->lastTimeAssignedCpu = -1;
         this->serviceTimeLeft = serviceTime;
         this->completionTime = -1;
@@ -46,6 +43,9 @@ public:
 
     double getServiceTime() { return this->serviceTime; }
 
+    double getWaitTime() { return this->waitTime; }
+    double setWaitTime(double waitTime) { this->waitTime = waitTime; }
+
     double getLastTimeAssignedCpu() { return this->lastTimeAssignedCpu; }
     double setLastTimeAssignedCpu(double lastTimeOnCpu) { this->lastTimeAssignedCpu = lastTimeOnCpu; }
 
@@ -54,6 +54,10 @@ public:
 
     void setCompletionTime(double completionTime) { this->completionTime = completionTime; }
     double getCompletionTime() { return this->completionTime; }
+
+    double calcResponseRatio() {
+        return (this->waitTime + this->serviceTime) / this->serviceTime;
+    }
 
 };
 

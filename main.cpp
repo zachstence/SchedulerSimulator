@@ -6,6 +6,8 @@
 #include <algorithm>
 
 #include "EventQueue.h"
+#include "ReadyQueue.h"
+#include "PriorityComparator.h"
 
 using std::string;
 using std::to_string;
@@ -42,9 +44,11 @@ double inversePoisson(double rate) {
     return -1 * log(1 - y) / rate;
 }
 
-Statistics simulateFCFS(int numProcesses, double arrivalRate, double serviceTime, double queryInterval) {
+template <class PriorityComparator>
+Statistics simulateNonPreemptivePriority(int numProcesses, double arrivalRate, double serviceTime,
+        double queryInterval) {
     EventQueue eventQueue;
-    queue<Process*> readyQueue;
+    ReadyQueue<PriorityComparator> readyQueue;
     vector<Process*> processes;
 
     double clock = 0;
@@ -78,7 +82,7 @@ Statistics simulateFCFS(int numProcesses, double arrivalRate, double serviceTime
             }
                 // If CPU is not idle, add arriving event to ready queue
             else {
-                readyQueue.push(current.process);
+                readyQueue.add(current.process);
             }
 
             // Schedule next event's arrival
@@ -89,7 +93,7 @@ Statistics simulateFCFS(int numProcesses, double arrivalRate, double serviceTime
             eventQueue.scheduleEvent(nextArrivalTime, nextArrival, ARRIVAL);
         }
 
-        // If departure event
+            // If departure event
         else if (current.type == DEPARTURE) {
             // Increment number of processes simulated at each departure
             processesSimulated++;
@@ -100,11 +104,10 @@ Statistics simulateFCFS(int numProcesses, double arrivalRate, double serviceTime
                 cpuIdle = true;
                 lastCpuBusyTime = clock;
             }
-            // If ready queue is not empty, get next process from ready queue and let it use CPU and schedule its
-            // departure
+                // If ready queue is not empty, get next process from ready queue and let it use CPU and schedule its
+                // departure
             else {
-                Process* p = readyQueue.front();
-                readyQueue.pop();
+                Process* p = readyQueue.getFront();
                 cpuIdle = false;
                 eventQueue.scheduleEvent(clock + p->getServiceTime(), p, DEPARTURE);
             }
@@ -130,10 +133,11 @@ Statistics simulateFCFS(int numProcesses, double arrivalRate, double serviceTime
     double avgReadyQueueSize = (double) totalInReadyQueue / (clock / queryInterval);
 
     return {avgTurnaroundTime, throughput, avgCpuUtil, avgReadyQueueSize};
+
 }
 
 Statistics simulateSRTF(int numProcesses, double arrivalRate, double serviceTime, double queryInterval) {
-    class SRTFComparator {
+    class SRTFPriority {
     public:
         bool operator()(Process* p1, Process* p2) {
             return p1->getServiceTimeLeft() > p2->getServiceTimeLeft();
@@ -141,7 +145,7 @@ Statistics simulateSRTF(int numProcesses, double arrivalRate, double serviceTime
     };
 
     EventQueue eventQueue;
-    priority_queue<Process*, vector<Process*>, SRTFComparator> readyQueue;
+    ReadyQueue<SRTFPriority> readyQueue;
     vector<Process*> processes;
     Process* onCpu = nullptr;
 
@@ -190,7 +194,7 @@ Statistics simulateSRTF(int numProcesses, double arrivalRate, double serviceTime
                     // Delete tentative departure of process on CPU
                     eventQueue.unscheduleDeparture(onCpu->getId());
                     // Move process from CPU to ready queue
-                    readyQueue.push(onCpu);
+                    readyQueue.add(onCpu);
                     // Assign arriving process to CPU
                     current.process->setLastTimeAssignedCpu(clock);
                     onCpu = current.process;
@@ -199,7 +203,8 @@ Statistics simulateSRTF(int numProcesses, double arrivalRate, double serviceTime
                 }
                 // Otherwise, don't preempt. Put arriving process in ready queue
                 else {
-                    readyQueue.push(current.process);
+//                    readyQueue.push(current.process);
+                    readyQueue.add(current.process);
                 }
             }
 
@@ -225,8 +230,7 @@ Statistics simulateSRTF(int numProcesses, double arrivalRate, double serviceTime
             // If ready queue is not empty, put next process from ready queue on CPU
             // and schedule its tentative departure
             else {
-                Process* p = readyQueue.top();
-                readyQueue.pop();
+                Process* p = readyQueue.getFront();
                 p->setLastTimeAssignedCpu(clock);
                 onCpu = p;
                 cpuIdle = false;
@@ -255,10 +259,6 @@ Statistics simulateSRTF(int numProcesses, double arrivalRate, double serviceTime
     return {avgTurnaroundTime, throughput, avgCpuUtil, avgReadyQueueSize};
 }
 
-Statistics simulateHRRN(int numProcesses, double arrivalRate, double serviceTime, double queryInterval) {
-    return {};
-}
-
 Statistics simulateRR(int numProcesses, double arrivalRate, double serviceTime, double quantumLength, double queryInterval) {
     return {};
 }
@@ -279,7 +279,7 @@ void runAllSimulations() {
     cout << "Simulating FCFS...";
     csvOut.open("FCFS.csv");
     for (double arrivalRate : arrivalRates) {
-        s = simulateFCFS(numProcesses, arrivalRate, serviceTime, queryInterval);
+        s = simulateNonPreemptivePriority<FCFSPriorityComparator>(numProcesses, arrivalRate, serviceTime, queryInterval);
         csvOut << arrivalRate << "," << s.avgTurnaroundTime << "," << s.throughput << "," << s.avgCpuUtil
                << "," << s.avgReadyQueueSize << endl;
     }
@@ -301,7 +301,7 @@ void runAllSimulations() {
     cout << "Simulating HRRN...";
     csvOut.open("HRRN.csv");
     for (double arrivalRate : arrivalRates) {
-        s = simulateHRRN(numProcesses, arrivalRate, serviceTime, queryInterval);
+        s = simulateNonPreemptivePriority<HRRNPriorityComparator>(numProcesses, arrivalRate, serviceTime, queryInterval);
         csvOut << arrivalRate << "," << s.avgTurnaroundTime << "," << s.throughput << "," << s.avgCpuUtil
                << "," << s.avgReadyQueueSize << endl;
     }
@@ -327,8 +327,8 @@ void runAllSimulations() {
 
 int main(int argc, char* argv[]) {
     srand((uint) time(nullptr));
-//    srand(3);
 
+/*
     int numProcesses = 10000;
     double queryInterval = 0.01;
     int scheduler, arrivalRate;
@@ -348,13 +348,13 @@ int main(int argc, char* argv[]) {
 
         switch (scheduler) {
             case 1:
-                s = simulateFCFS(numProcesses, arrivalRate, serviceTime, queryInterval);
+                s = simulateNonPreemptivePriority<FCFSPriorityComparator>(numProcesses, arrivalRate, serviceTime, queryInterval);
                 break;
             case 2:
                 s = simulateSRTF(numProcesses, arrivalRate, serviceTime, queryInterval);
                 break;
             case 3:
-                s = simulateHRRN(numProcesses, arrivalRate, serviceTime, queryInterval);
+                s = simulateNonPreemptivePriority<HRRNPriorityComparator>(numProcesses, arrivalRate, serviceTime, queryInterval);
                 break;
             case 4:
                 s = simulateRR(numProcesses, arrivalRate, serviceTime, quantumLength, queryInterval);
@@ -368,5 +368,44 @@ int main(int argc, char* argv[]) {
         return 0;
 
     } else return 1;
+*/
+
+    class Integer {
+    private:
+        int x;
+    public:
+        Integer(int x) { this->x = x; }
+        int getX() { return this->x; }
+        void update() {
+            x = rand() % 5;
+        }
+    };
+
+    class IntegerComparator {
+    public:
+        bool operator()(Integer* i1, Integer* i2) {
+            return i1->getX() < i2->getX();
+        }
+    };
+
+    set<Integer*, IntegerComparator> s;
+    s.insert(new Integer(1));
+    s.insert(new Integer(3));
+    s.insert(new Integer(5));
+
+    for (auto x : s) {
+        cout << x->getX() << " ";
+    }
+    cout << endl;
+
+    for (auto x : s) {
+        x->update();
+    }
+    std::sort(s.begin(), s.end(), IntegerComparator());
+
+    for (auto x : s) {
+        cout << x->getX() << " ";
+    }
+    cout << endl;
 
 }
