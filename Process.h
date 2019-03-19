@@ -13,7 +13,7 @@ private:
     double arrivalTime;
     double serviceTime;
 
-    double lastTimeOnCpu;
+    double lastTimeAssignedCpu;
     double serviceTimeLeft;
     double completionTime;
 
@@ -28,7 +28,7 @@ public:
         this->arrivalTime = arrivalTime;
         this->serviceTime = serviceTime;
 
-        this->lastTimeOnCpu = -1;
+        this->lastTimeAssignedCpu = -1;
         this->serviceTimeLeft = serviceTime;
         this->completionTime = -1;
     }
@@ -36,7 +36,8 @@ public:
     void decreaseServiceTimeLeft(double amount) {
         this->serviceTimeLeft -= amount;
         // TODO remove later?
-        if (this->serviceTimeLeft <= 0) printf("Scheduling error! Process used more CPU than needed!\n");
+        if (this->serviceTimeLeft < 0)
+            printf("Scheduling error! Process %d used more CPU than needed!\n", this->id);
     }
 
     int getId() { return this->id; }
@@ -45,10 +46,11 @@ public:
 
     double getServiceTime() { return this->serviceTime; }
 
-    double getLastTimeOnCpu() { return this->lastTimeOnCpu; }
-    double setLastTimeOnCpu(double lastTimeOnCpu) { this->lastTimeOnCpu = lastTimeOnCpu; }
+    double getLastTimeAssignedCpu() { return this->lastTimeAssignedCpu; }
+    double setLastTimeAssignedCpu(double lastTimeOnCpu) { this->lastTimeAssignedCpu = lastTimeOnCpu; }
 
     double getServiceTimeLeft() { return this->serviceTimeLeft; }
+    double setServiceTimeLeft(double serviceTimeLeft) { this->serviceTimeLeft = serviceTimeLeft; }
 
     void setCompletionTime(double completionTime) { this->completionTime = completionTime; }
     double getCompletionTime() { return this->completionTime; }

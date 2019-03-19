@@ -35,7 +35,7 @@ public:
 
     bool unscheduleDeparture(int id) {
         for (Event event : events) {
-            if (event.process->getId() == id) {
+            if (event.type == DEPARTURE && event.process->getId() == id) {
                 events.erase(event);
                 return true;
             }

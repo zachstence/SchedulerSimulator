@@ -132,18 +132,18 @@ Statistics simulateFCFS(int numProcesses, double arrivalRate, double serviceTime
     return {avgTurnaroundTime, throughput, avgCpuUtil, avgReadyQueueSize};
 }
 
-class SRTFComparator {
-public:
-    bool operator()(Process* p1, Process* p2) {
-        return p1->getServiceTimeLeft() < p2->getServiceTimeLeft();
-    }
-};
-
 Statistics simulateSRTF(int numProcesses, double arrivalRate, double serviceTime, double queryInterval) {
+    class SRTFComparator {
+    public:
+        bool operator()(Process* p1, Process* p2) {
+            return p1->getServiceTimeLeft() > p2->getServiceTimeLeft();
+        }
+    };
+
     EventQueue eventQueue;
     priority_queue<Process*, vector<Process*>, SRTFComparator> readyQueue;
     vector<Process*> processes;
-    Process* onCpu;
+    Process* onCpu = nullptr;
 
     double clock = 0;
     bool cpuIdle = true;
@@ -154,7 +154,7 @@ Statistics simulateSRTF(int numProcesses, double arrivalRate, double serviceTime
     eventQueue.scheduleEvent(clock, firstProcess, ARRIVAL);
 
     // Schedule first query event
-    eventQueue.scheduleEvent(clock, nullptr, QUERY);
+    eventQueue.scheduleEvent(clock + queryInterval, nullptr, QUERY);
 
     int processesSimulated = 0;
     double cpuIdleTime = 0;
@@ -168,29 +168,39 @@ Statistics simulateSRTF(int numProcesses, double arrivalRate, double serviceTime
 
         // If arrival event
         if (current.type == ARRIVAL) {
-            // If CPU is idle, let arriving event use CPU and schedule tentative departure
+            // If CPU is idle
             if (cpuIdle) {
+                // Set CPU to busy and update idle time
                 cpuIdle = false;
-                current.process->setLastTimeOnCpu(clock);
                 cpuIdleTime += clock - lastCpuBusyTime;
-                eventQueue.scheduleEvent(clock + current.process->getServiceTimeLeft(), current.process, DEPARTURE);
+                // Assign arriving process to CPU
+                current.process->setLastTimeAssignedCpu(clock);
                 onCpu = current.process;
+                // Schedule arriving process' tentative departure
+                eventQueue.scheduleEvent(clock + current.process->getServiceTimeLeft(), current.process, DEPARTURE);
             }
             // If CPU is busy, check for preemption
-            // Preemption process:
-            //   - Update onCpu remaining time
-            //   - Delete tentative departure of onCpu
-            //   - Put onCpu in ready queue
-            //   - Put front of ready queue on CPU
-            //   - Schedule new tentative departure
-            else if (current.process->getServiceTimeLeft() < onCpu->getServiceTimeLeft()) {
-                onCpu->decreaseServiceTimeLeft(clock - onCpu->getLastTimeOnCpu());
-                bool success = eventQueue.unscheduleDeparture(onCpu->getId());
-                if (!success) printf("Scheduling error! Couldn't remove tentative departure!"); // TODO remove later?
-                readyQueue.push(onCpu);
-                onCpu = readyQueue.top();
-                readyQueue.pop();
-                eventQueue.scheduleEvent(clock + onCpu->getServiceTimeLeft(), onCpu, DEPARTURE);
+            else {
+                // Calculate onCpu remaining time
+                double onCpuRemainingTime = onCpu->getServiceTimeLeft() - (clock - onCpu->getLastTimeAssignedCpu());
+                // Check for preemption, if so
+                if (current.process->getServiceTimeLeft() < onCpuRemainingTime) {
+                    // Update onCpu's remaining time
+                    onCpu->setServiceTimeLeft(onCpuRemainingTime);
+                    // Delete tentative departure of process on CPU
+                    eventQueue.unscheduleDeparture(onCpu->getId());
+                    // Move process from CPU to ready queue
+                    readyQueue.push(onCpu);
+                    // Assign arriving process to CPU
+                    current.process->setLastTimeAssignedCpu(clock);
+                    onCpu = current.process;
+                    // Schedule arriving process' tentative departure
+                    eventQueue.scheduleEvent(clock + onCpu->getServiceTimeLeft(), onCpu, DEPARTURE);
+                }
+                // Otherwise, don't preempt. Put arriving process in ready queue
+                else {
+                    readyQueue.push(current.process);
+                }
             }
 
             // Schedule next arrival
@@ -209,6 +219,7 @@ Statistics simulateSRTF(int numProcesses, double arrivalRate, double serviceTime
             // If ready queue is empty, set CPU to idle
             if (readyQueue.empty()) {
                 cpuIdle = true;
+                onCpu = nullptr;
                 lastCpuBusyTime = clock;
             }
             // If ready queue is not empty, put next process from ready queue on CPU
@@ -216,6 +227,8 @@ Statistics simulateSRTF(int numProcesses, double arrivalRate, double serviceTime
             else {
                 Process* p = readyQueue.top();
                 readyQueue.pop();
+                p->setLastTimeAssignedCpu(clock);
+                onCpu = p;
                 cpuIdle = false;
                 eventQueue.scheduleEvent(clock + p->getServiceTimeLeft(), p, DEPARTURE);
             }
@@ -243,11 +256,11 @@ Statistics simulateSRTF(int numProcesses, double arrivalRate, double serviceTime
 }
 
 Statistics simulateHRRN(int numProcesses, double arrivalRate, double serviceTime, double queryInterval) {
-
+    return {};
 }
 
 Statistics simulateRR(int numProcesses, double arrivalRate, double serviceTime, double quantumLength, double queryInterval) {
-
+    return {};
 }
 
 void runAllSimulations() {
@@ -260,9 +273,10 @@ void runAllSimulations() {
     double queryInterval = 0.1;
 
     Statistics s {};
+    ofstream csvOut;
 
     // FCFS
-    ofstream csvOut;
+    cout << "Simulating FCFS...";
     csvOut.open("FCFS.csv");
     for (double arrivalRate : arrivalRates) {
         s = simulateFCFS(numProcesses, arrivalRate, serviceTime, queryInterval);
@@ -270,8 +284,10 @@ void runAllSimulations() {
                << "," << s.avgReadyQueueSize << endl;
     }
     csvOut.close();
+    cout << "done" << endl;
 
     // SRTF
+    cout << "Simulating SRTF...";
     csvOut.open("SRTF.csv");
     for (double arrivalRate : arrivalRates) {
         s = simulateSRTF(numProcesses, arrivalRate, serviceTime, queryInterval);
@@ -279,8 +295,10 @@ void runAllSimulations() {
                << "," << s.avgReadyQueueSize << endl;
     }
     csvOut.close();
+    cout << "done" << endl;
 
     // HRRN
+    cout << "Simulating HRRN...";
     csvOut.open("HRRN.csv");
     for (double arrivalRate : arrivalRates) {
         s = simulateHRRN(numProcesses, arrivalRate, serviceTime, queryInterval);
@@ -288,10 +306,12 @@ void runAllSimulations() {
                << "," << s.avgReadyQueueSize << endl;
     }
     csvOut.close();
+    cout << "done" << endl;
 
     // RR
     double quantums[] {0.01, 0.2};
     for (auto quantum : quantums) {
+        cout << "Simulating RR(" << quantum << ")...";
         csvOut.open("RR.csv");
         for (double arrivalRate : arrivalRates) {
             s = simulateRR(numProcesses, arrivalRate, serviceTime, quantum, queryInterval);
@@ -299,11 +319,15 @@ void runAllSimulations() {
                    << "," << s.avgReadyQueueSize << endl;
         }
         csvOut.close();
+        cout << "done" << endl;
     }
+
+    cout << "Finished all simulations." << endl;
 }
 
 int main(int argc, char* argv[]) {
-    srand(time(NULL));
+    srand((uint) time(nullptr));
+//    srand(3);
 
     int numProcesses = 10000;
     double queryInterval = 0.01;
