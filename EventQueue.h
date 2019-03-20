@@ -56,6 +56,7 @@ public:
     bool empty() {
         return events.empty();
     }
+
 };
 
 

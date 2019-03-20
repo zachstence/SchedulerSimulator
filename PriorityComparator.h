@@ -18,10 +18,23 @@ public:
     }
 };
 
+class SRTFPriorityComparator : PriorityComparator {
+public:
+    bool operator()(Process* p1, Process* p2) {
+        if (p1->getServiceTimeLeft() != p2->getServiceTimeLeft())
+            return p1->getServiceTimeLeft() < p2->getServiceTimeLeft();
+        else
+            return p1->getArrivalTime() < p2->getArrivalTime();
+    }
+};
+
 class HRRNPriorityComparator : PriorityComparator {
 public:
     bool operator()(Process* p1, Process* p2) {
-        return p1->calcResponseRatio() > p2->calcResponseRatio();
+        if (p1->calcResponseRatio() != p2->calcResponseRatio())
+            return p1->calcResponseRatio() > p2->calcResponseRatio();
+        else
+            return p1->getArrivalTime() < p2->getArrivalTime();
     }
 };
 
