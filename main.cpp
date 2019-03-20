@@ -141,10 +141,6 @@ Statistics simulateNonPreemptivePriorityBased(int numProcesses, double arrivalRa
         }
     }
 
-//    for (Process* p : processes) {
-//        cout << p->getId() << "\t" << p->getArrivalTime() << "\t" << p->getServiceTime() << "\t" << p->getCompletionTime() << endl;
-//    }
-
     // Sum turnaround times for statistics
     double totalTurnaroundTime = 0;
     for (auto process : processes) {
@@ -163,8 +159,8 @@ Statistics simulateNonPreemptivePriorityBased(int numProcesses, double arrivalRa
 }
 
 template <class PriorityComparator>
-Statistics simulatePreemptivePriorityBased(int numProcesses, double arrivalRate, double serviceTime,
-                                           double queryInterval) {
+Statistics simulatePriorityBased(int numProcesses, double arrivalRate, double serviceTime,
+                                 double queryInterval, bool preemptive, bool dynamicPriority) {
     EventQueue eventQueue;
     ReadyQueue<PriorityComparator> readyQueue;
     vector<Process*> processes;
@@ -208,25 +204,28 @@ Statistics simulatePreemptivePriorityBased(int numProcesses, double arrivalRate,
             else {
                 // Add arriving process to ready queue and update statistics
                 readyQueue.add(current.process);
-                onCpu->setServiceTimeLeft(onCpu->getServiceTimeLeft() - (clock - onCpu->getLastTimeAssignedCpu()));
-                updateWaitTimes(&readyQueue, clock);
 
-                Process* candidate = readyQueue.getFront();
-                if (PriorityComparator()(candidate, onCpu)) {
-                    // Delete tentative departure of process on CPU
-                    eventQueue.unscheduleDeparture(onCpu->getId());
-                    // Move process from CPU to ready queue
-                    readyQueue.add(onCpu);
-                    // Assign arriving process to CPU
-                    onCpu = candidate;
-                    // Schedule tentative departure for new process
-                    eventQueue.scheduleEvent(clock + onCpu->getServiceTimeLeft(), onCpu, DEPARTURE);
+                if (preemptive) {
+                    onCpu->setServiceTimeLeft(onCpu->getServiceTimeLeft() - (clock - onCpu->getLastTimeAssignedCpu()));
+                    updateWaitTimes(&readyQueue, clock);
+
+                    Process* candidate = readyQueue.getFront();
+                    if (PriorityComparator()(candidate, onCpu)) {
+                        // Delete tentative departure of process on CPU
+                        eventQueue.unscheduleDeparture(onCpu->getId());
+                        // Move process from CPU to ready queue
+                        readyQueue.add(onCpu);
+                        // Assign arriving process to CPU
+                        onCpu = candidate;
+                        // Schedule tentative departure for new process
+                        eventQueue.scheduleEvent(clock + onCpu->getServiceTimeLeft(), onCpu, DEPARTURE);
+                    }
+                    else {
+                        readyQueue.add(candidate);
+                    }
+                    // Update last time assigned CPU
+                    onCpu->setLastTimeAssignedCpu(clock);
                 }
-                else {
-                    readyQueue.add(candidate);
-                }
-                // Update last time assigned CPU
-                onCpu->setLastTimeAssignedCpu(clock);
             }
 
             // Schedule next arrival
@@ -251,6 +250,10 @@ Statistics simulatePreemptivePriorityBased(int numProcesses, double arrivalRate,
                 // If ready queue is not empty, put next process from ready queue on CPU
                 // and schedule its tentative departure
             else {
+                // Update wait times and resort queue
+                if (dynamicPriority)
+                    updateWaitTimes(&readyQueue, clock);
+
                 Process* p = readyQueue.getFront();
                 p->setLastTimeAssignedCpu(clock);
                 onCpu = p;
@@ -302,8 +305,8 @@ void runAllSimulations() {
     csvOut.open("FCFS.csv");
     for (double arrivalRate : arrivalRates) {
         cout << "\rSimulating FCFS..." << arrivalRate << "/" << arrivalRates[arrivalRates.size() - 1] << std::flush;
-        s = simulateNonPreemptivePriorityBased<FCFSPriorityComparator>(numProcesses, arrivalRate, serviceTime,
-                                                                       queryInterval, false);
+        s = simulatePriorityBased<FCFSPriorityComparator>(numProcesses, arrivalRate, serviceTime,
+                                                                       queryInterval, false, false);
         csvOut << arrivalRate << "," << s.avgTurnaroundTime << "," << s.throughput << "," << s.avgCpuUtil
                << "," << s.avgReadyQueueSize << endl;
     }
@@ -314,7 +317,8 @@ void runAllSimulations() {
     csvOut.open("SRTF.csv");
     for (double arrivalRate : arrivalRates) {
         cout << "\rSimulating SRTF..." << arrivalRate << "/" << arrivalRates[arrivalRates.size() - 1] << std::flush;
-        s = simulatePreemptivePriorityBased<SRTFPriorityComparator>(numProcesses, arrivalRate, serviceTime, queryInterval);
+        s = simulatePriorityBased<SRTFPriorityComparator>(numProcesses, arrivalRate, serviceTime,
+                                                          queryInterval, true, false);
         csvOut << arrivalRate << "," << s.avgTurnaroundTime << "," << s.throughput << "," << s.avgCpuUtil
                << "," << s.avgReadyQueueSize << endl;
     }
@@ -325,14 +329,15 @@ void runAllSimulations() {
     csvOut.open("HRRN.csv");
     for (double arrivalRate : arrivalRates) {
         cout << "\rSimulating HRRN..." << arrivalRate << "/" << arrivalRates[arrivalRates.size() - 1] << std::flush;
-        s = simulateNonPreemptivePriorityBased<HRRNPriorityComparator>(numProcesses, arrivalRate, serviceTime,
-                                                                       queryInterval, true);
+        s = simulatePriorityBased<HRRNPriorityComparator>(numProcesses, arrivalRate, serviceTime,
+                                                                       queryInterval, false, true);
         csvOut << arrivalRate << "," << s.avgTurnaroundTime << "," << s.throughput << "," << s.avgCpuUtil
                << "," << s.avgReadyQueueSize << endl;
     }
     csvOut.close();
     cout << "\rSimulating HRRN...done" << endl;
 
+/*
     // RR
     double quantums[] {0.01, 0.2};
     for (auto quantum : quantums) {
@@ -346,6 +351,7 @@ void runAllSimulations() {
         csvOut.close();
         cout << "\rSimulating RR" << quantum << "...done" << endl;
     }
+*/
 
     cout << "Finished all simulations." << endl;
 }
@@ -371,14 +377,15 @@ int main(int argc, char* argv[]) {
 
         Statistics s {};
 
+/*
         switch (scheduler) {
             case 1:
                 s = simulateNonPreemptivePriorityBased<FCFSPriorityComparator>(numProcesses, arrivalRate, serviceTime,
                                                                                queryInterval, false);
                 break;
             case 2:
-                s = simulatePreemptivePriorityBased<SRTFPriorityComparator>(numProcesses, arrivalRate, serviceTime,
-                                                                            queryInterval);
+                s = simulatePriorityBased<SRTFPriorityComparator>(numProcesses, arrivalRate, serviceTime,
+                                                                  queryInterval);
                 break;
             case 3:
                 s = simulateNonPreemptivePriorityBased<HRRNPriorityComparator>(numProcesses, arrivalRate, serviceTime,
@@ -394,6 +401,7 @@ int main(int argc, char* argv[]) {
         s.display();
 
         return 0;
+*/
 
     } else return 1;
 
