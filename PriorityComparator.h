@@ -38,4 +38,14 @@ public:
     }
 };
 
+class HWTNPriorityComparator : PriorityComparator {
+public:
+    bool operator()(Process* p1, Process* p2) {
+        if (p1->getWaitTime() == p2->getWaitTime())
+            return p1->getArrivalTime() < p2->getArrivalTime();
+        else
+            return p1->getWaitTime() > p2->getWaitTime();
+    }
+};
+
 #endif //CS4328_PROJECT1_PRIORITYCOMPARATOR_H

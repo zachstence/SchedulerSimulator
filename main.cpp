@@ -50,6 +50,17 @@ double inversePoisson(double rate) {
 }
 
 template <class PriorityComparator>
+void updateWaitTimes(ReadyQueue<PriorityComparator>* readyQueue, double clock) {
+    for (auto process : readyQueue->getProcesses()) {
+        if (process->getLastTimeAssignedCpu() == -1)
+            process->setWaitTime(clock - process->getArrivalTime());
+        else
+            process->setWaitTime(clock - process->getLastTimeAssignedCpu());
+    }
+    readyQueue->sort();
+}
+
+template <class PriorityComparator>
 Statistics simulateNonPreemptivePriorityBased(int numProcesses, double arrivalRate, double serviceTime,
                                               double queryInterval, bool dynamicPriority) {
     EventQueue eventQueue;
@@ -114,15 +125,8 @@ Statistics simulateNonPreemptivePriorityBased(int numProcesses, double arrivalRa
             // departure
             else {
                 // Update wait times and resort queue
-                if (dynamicPriority) {
-                    for (auto process : readyQueue.getProcesses()) {
-                        if (process->getLastTimeAssignedCpu() == -1)
-                            process->setWaitTime(clock - process->getArrivalTime());
-                        else
-                            process->setWaitTime(clock - process->getLastTimeAssignedCpu());
-                    }
-                    readyQueue.sort();
-                }
+                if (dynamicPriority)
+                    updateWaitTimes(&readyQueue, clock);
 
                 Process* p = readyQueue.getFront();
                 cpuIdle = false;
@@ -200,29 +204,29 @@ Statistics simulatePreemptivePriorityBased(int numProcesses, double arrivalRate,
                 // Schedule arriving process' tentative departure
                 eventQueue.scheduleEvent(clock + current.process->getServiceTimeLeft(), current.process, DEPARTURE);
             }
-            // If CPU is busy, check for preemption
+            // If CPU is busy, add arriving process to ready queue and compare onCpu with front of ready queue for preemption
             else {
-                // Calculate onCpu remaining time
-                double onCpuRemainingTime = onCpu->getServiceTimeLeft() - (clock - onCpu->getLastTimeAssignedCpu());
-                // Check for preemption, if so
-                if (current.process->getServiceTimeLeft() < onCpuRemainingTime) {
-                    // Update onCpu's remaining time
-                    onCpu->setServiceTimeLeft(onCpuRemainingTime);
+                // Add arriving process to ready queue and update statistics
+                readyQueue.add(current.process);
+                onCpu->setServiceTimeLeft(onCpu->getServiceTimeLeft() - (clock - onCpu->getLastTimeAssignedCpu()));
+                updateWaitTimes(&readyQueue, clock);
+
+                Process* candidate = readyQueue.getFront();
+                if (PriorityComparator()(candidate, onCpu)) {
                     // Delete tentative departure of process on CPU
                     eventQueue.unscheduleDeparture(onCpu->getId());
                     // Move process from CPU to ready queue
                     readyQueue.add(onCpu);
                     // Assign arriving process to CPU
-                    current.process->setLastTimeAssignedCpu(clock);
-                    onCpu = current.process;
-                    // Schedule arriving process' tentative departure
+                    onCpu = candidate;
+                    // Schedule tentative departure for new process
                     eventQueue.scheduleEvent(clock + onCpu->getServiceTimeLeft(), onCpu, DEPARTURE);
                 }
-                    // Otherwise, don't preempt. Put arriving process in ready queue
                 else {
-//                    readyQueue.push(current.process);
-                    readyQueue.add(current.process);
+                    readyQueue.add(candidate);
                 }
+                // Update last time assigned CPU
+                onCpu->setLastTimeAssignedCpu(clock);
             }
 
             // Schedule next arrival
@@ -232,7 +236,7 @@ Statistics simulatePreemptivePriorityBased(int numProcesses, double arrivalRate,
             processes.push_back(nextArrival);
             eventQueue.scheduleEvent(nextArrivalTime, nextArrival, ARRIVAL);
         }
-            // If departure event
+        // If departure event
         else if (current.type == DEPARTURE) {
             // Increment number of processes simulated at each departure
             processesSimulated++;
@@ -277,124 +281,6 @@ Statistics simulatePreemptivePriorityBased(int numProcesses, double arrivalRate,
 
 
 }
-
-/*
-Statistics simulateSRTF(int numProcesses, double arrivalRate, double serviceTime, double queryInterval) {
-    EventQueue eventQueue;
-    ReadyQueue<SRTFPriorityComparator> readyQueue;
-    vector<Process*> processes;
-    Process* onCpu = nullptr;
-
-    double clock = 0;
-    bool cpuIdle = true;
-
-    // Schedule first process arrival
-    auto firstProcess = new Process(0, 0, inversePoisson(1 / serviceTime));
-    processes.push_back(firstProcess);
-    eventQueue.scheduleEvent(clock, firstProcess, ARRIVAL);
-
-    // Schedule first query event
-    eventQueue.scheduleEvent(clock + queryInterval, nullptr, QUERY);
-
-    int processesSimulated = 0;
-    double cpuIdleTime = 0;
-    double lastCpuBusyTime = 0;
-    int totalInReadyQueue = 0;
-
-    while (processesSimulated < numProcesses && !eventQueue.empty()) {
-
-        Event current = eventQueue.getEvent();
-        clock = current.time;
-
-        // If arrival event
-        if (current.type == ARRIVAL) {
-            // If CPU is idle
-            if (cpuIdle) {
-                // Set CPU to busy and update idle time
-                cpuIdle = false;
-                cpuIdleTime += clock - lastCpuBusyTime;
-                // Assign arriving process to CPU
-                current.process->setLastTimeAssignedCpu(clock);
-                onCpu = current.process;
-                // Schedule arriving process' tentative departure
-                eventQueue.scheduleEvent(clock + current.process->getServiceTimeLeft(), current.process, DEPARTURE);
-            }
-            // If CPU is busy, check for preemption
-            else {
-                // Calculate onCpu remaining time
-                double onCpuRemainingTime = onCpu->getServiceTimeLeft() - (clock - onCpu->getLastTimeAssignedCpu());
-                // Check for preemption, if so
-                if (current.process->getServiceTimeLeft() < onCpuRemainingTime) {
-                    // Update onCpu's remaining time
-                    onCpu->setServiceTimeLeft(onCpuRemainingTime);
-                    // Delete tentative departure of process on CPU
-                    eventQueue.unscheduleDeparture(onCpu->getId());
-                    // Move process from CPU to ready queue
-                    readyQueue.add(onCpu);
-                    // Assign arriving process to CPU
-                    current.process->setLastTimeAssignedCpu(clock);
-                    onCpu = current.process;
-                    // Schedule arriving process' tentative departure
-                    eventQueue.scheduleEvent(clock + onCpu->getServiceTimeLeft(), onCpu, DEPARTURE);
-                }
-                // Otherwise, don't preempt. Put arriving process in ready queue
-                else {
-//                    readyQueue.push(current.process);
-                    readyQueue.add(current.process);
-                }
-            }
-
-            // Schedule next arrival
-            int nextId = current.process->getId() + 1;
-            double nextArrivalTime = clock + inversePoisson(arrivalRate);
-            auto nextArrival = new Process(nextId, nextArrivalTime, inversePoisson(1 / serviceTime));
-            processes.push_back(nextArrival);
-            eventQueue.scheduleEvent(nextArrivalTime, nextArrival, ARRIVAL);
-        }
-        // If departure event
-        else if (current.type == DEPARTURE) {
-            // Increment number of processes simulated at each departure
-            processesSimulated++;
-            current.process->setCompletionTime(clock);
-
-            // If ready queue is empty, set CPU to idle
-            if (readyQueue.empty()) {
-                cpuIdle = true;
-                onCpu = nullptr;
-                lastCpuBusyTime = clock;
-            }
-            // If ready queue is not empty, put next process from ready queue on CPU
-            // and schedule its tentative departure
-            else {
-                Process* p = readyQueue.getFront();
-                p->setLastTimeAssignedCpu(clock);
-                onCpu = p;
-                cpuIdle = false;
-                eventQueue.scheduleEvent(clock + p->getServiceTimeLeft(), p, DEPARTURE);
-            }
-        }
-        else if (current.type == QUERY) {
-            totalInReadyQueue += readyQueue.size();
-            eventQueue.scheduleEvent(clock + queryInterval, nullptr, QUERY);
-        }
-    }
-
-    // Sum turnaround times for statistics
-    double totalTurnaroundTime = 0;
-    for (auto process : processes) {
-        if (process->getCompletionTime() == -1) continue;
-        double turnaround = process->getCompletionTime() - process->getArrivalTime();
-        totalTurnaroundTime += turnaround;
-    }
-
-    double avgTurnaroundTime = totalTurnaroundTime / numProcesses;
-    double throughput = processesSimulated / clock;
-    double avgCpuUtil = 1 - (cpuIdleTime / clock);
-    double avgReadyQueueSize = (double) totalInReadyQueue / (clock / queryInterval);
-
-    return {avgTurnaroundTime, throughput, avgCpuUtil, avgReadyQueueSize};
-}
-*/
 
 Statistics simulateRR(int numProcesses, double arrivalRate, double serviceTime, double quantumLength, double queryInterval) {
     return {};
@@ -452,7 +338,7 @@ void runAllSimulations() {
     for (auto quantum : quantums) {
         csvOut.open("RR.csv");
         for (double arrivalRate : arrivalRates) {
-            cout << "\rSimulating RR" << quantum << "..." << arrivalRate << "/" << arrivalRates[arrivalRates.size() - 1] << std::flush;
+            cout << "\rSimulating RR(" << quantum << ")..." << arrivalRate << "/" << arrivalRates[arrivalRates.size() - 1] << std::flush;
             s = simulateRR(numProcesses, arrivalRate, serviceTime, quantum, queryInterval);
             csvOut << arrivalRate << "," << s.avgTurnaroundTime << "," << s.throughput << "," << s.avgCpuUtil
                    << "," << s.avgReadyQueueSize << endl;
