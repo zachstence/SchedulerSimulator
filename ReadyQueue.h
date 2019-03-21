@@ -27,45 +27,28 @@ public:
             printf("Error adding process %d to ready queue\n", p->getId());
     }
 
-/*
-    void add(Process* p) {
-        if (processes.empty()) {
-            processes.insert(processes.begin(), p);
-            return;
-        }
-        auto it = processes.begin();
-        while (it != processes.end()) {
-            if (PriorityComparator()(p, *it))
-                processes.insert(it, p);
-            it++;
-        }
-        processes.insert(it, p);
-    }
-*/
-
     Process* getFront() {
         Process* p = *processes.begin();
         processes.erase(p);
         return p;
     }
 
-/*
-    Process* getFront() {
-        Process* p = *processes.begin();
-        processes.erase(processes.begin());
-        return p;
-    }
-*/
-
     const set<Process*, PriorityComparator> getProcesses() {
         return processes;
     }
 
+    void updateWaitTimes(double clock) {
+        for (auto process : this->getProcesses()) {
+            if (process->getLastTimeAssignedCpu() == -1)
+                process->setWaitTime(clock - process->getArrivalTime());
+            else
+                process->setWaitTime(clock - process->getLastTimeAssignedCpu());
+        }
+        this->sort();
+    }
 
     void sort() {
-//        std::sort(processes.begin(), processes.end(), PriorityComparator());
         processes = set<Process*, PriorityComparator>(processes.begin(), processes.end());
-
     }
 
     bool empty() {

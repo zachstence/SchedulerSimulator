@@ -43,124 +43,23 @@ struct Statistics {
     }
 };
 
-
 double inversePoisson(double rate) {
     double y = (double) rand() / RAND_MAX;
     return -1 * log(1 - y) / rate;
 }
 
-template <class PriorityComparator>
-void updateWaitTimes(ReadyQueue<PriorityComparator>* readyQueue, double clock) {
-    for (auto process : readyQueue->getProcesses()) {
-        if (process->getLastTimeAssignedCpu() == -1)
-            process->setWaitTime(clock - process->getArrivalTime());
-        else
-            process->setWaitTime(clock - process->getLastTimeAssignedCpu());
-    }
-    readyQueue->sort();
-}
+// TODO maybe put all code for choosing next process into its own function? would simplify simulatePriorityBased a lot
+// TODO and then whether its an arrival causing preemption, a departure, or a timeout preemption just call the same function
+// TODO to decide what process to run next. Would need to have readyQueue, doPreemption, and dynamicPriorty and comparator
+// TODO template as arguments to make scheduling decision. Wouldn't need to return anything, just have it modify the data structures
+// TODO might make code even more modular and remove duplicated stuff
+
+// TODO probably add parameter to simulatePriorityBased that is an interval for round robin-ing
+// TODO if negative, don't do RR, otherwise use that number as interval in seconds
 
 template <class PriorityComparator>
-Statistics simulateNonPreemptivePriorityBased(int numProcesses, double arrivalRate, double serviceTime,
-                                              double queryInterval, bool dynamicPriority) {
-    EventQueue eventQueue;
-    ReadyQueue<PriorityComparator> readyQueue;
-    vector<Process*> processes;
-
-    double clock = 0;
-    bool cpuIdle = true;
-
-    // Schedule first process arrival
-    auto firstProcess = new Process(0, 0, inversePoisson(1 / serviceTime));
-    processes.push_back(firstProcess);
-    eventQueue.scheduleEvent(clock, firstProcess, ARRIVAL);
-
-    // Schedule first query event
-    eventQueue.scheduleEvent(clock + queryInterval, nullptr, QUERY);
-
-    int processesSimulated = 0;
-    double cpuIdleTime = 0;
-    double lastCpuBusyTime = 0;
-    int totalInReadyQueue = 0;
-
-    while (processesSimulated < numProcesses && !eventQueue.empty()) {
-
-        Event current = eventQueue.getEvent();
-        clock = current.time;
-
-        // If arrival event
-        if (current.type == ARRIVAL) {
-            // If CPU is idle, let arriving event use CPU and schedule its departure
-            if (cpuIdle) {
-                cpuIdle = false;
-                cpuIdleTime += clock - lastCpuBusyTime;
-                current.process->setLastTimeAssignedCpu(clock);
-                eventQueue.scheduleEvent(clock + current.process->getServiceTime(), current.process, DEPARTURE);
-            }
-            // If CPU is not idle, add arriving event to ready queue
-            else {
-                readyQueue.add(current.process);
-            }
-
-            // Schedule next event's arrival
-            int nextId = current.process->getId() + 1;
-            double nextArrivalTime = clock + inversePoisson(arrivalRate);
-            auto nextArrival = new Process(nextId, nextArrivalTime, inversePoisson(1 / serviceTime));
-            processes.push_back(nextArrival);
-            eventQueue.scheduleEvent(nextArrivalTime, nextArrival, ARRIVAL);
-        }
-
-        // If departure event
-        else if (current.type == DEPARTURE) {
-            // Increment number of processes simulated at each departure
-            processesSimulated++;
-            current.process->setCompletionTime(clock);
-
-            // If ready queue is empty, set CPU to idle
-            if (readyQueue.empty()) {
-                cpuIdle = true;
-                lastCpuBusyTime = clock;
-            }
-            // If ready queue is not empty, get next process from ready queue and let it use CPU and schedule its
-            // departure
-            else {
-                // Update wait times and resort queue
-                if (dynamicPriority)
-                    updateWaitTimes(&readyQueue, clock);
-
-                Process* p = readyQueue.getFront();
-                cpuIdle = false;
-                p->setLastTimeAssignedCpu(clock);
-                eventQueue.scheduleEvent(clock + p->getServiceTime(), p, DEPARTURE);
-            }
-        }
-
-        else if (current.type == QUERY) {
-            totalInReadyQueue += readyQueue.size();
-            eventQueue.scheduleEvent(clock + queryInterval, nullptr, QUERY);
-        }
-    }
-
-    // Sum turnaround times for statistics
-    double totalTurnaroundTime = 0;
-    for (auto process : processes) {
-        if (process->getCompletionTime() == -1) continue;
-        double turnaround = process->getCompletionTime() - process->getArrivalTime();
-        totalTurnaroundTime += turnaround;
-    }
-
-    double avgTurnaroundTime = totalTurnaroundTime / numProcesses;
-    double throughput = processesSimulated / clock;
-    double avgCpuUtil = 1 - (cpuIdleTime / clock);
-    double avgReadyQueueSize = (double) totalInReadyQueue / (clock / queryInterval);
-
-    return {avgTurnaroundTime, throughput, avgCpuUtil, avgReadyQueueSize};
-
-}
-
-template <class PriorityComparator>
-Statistics simulatePriorityBased(int numProcesses, double arrivalRate, double serviceTime,
-                                 double queryInterval, bool preemptive, bool dynamicPriority) {
+Statistics simulatePriorityBased(int numProcesses, double arrivalRate, double serviceTime, double quantumLength,
+                                 double queryInterval, bool doPreemption, bool dynamicPriority) {
     EventQueue eventQueue;
     ReadyQueue<PriorityComparator> readyQueue;
     vector<Process*> processes;
@@ -173,6 +72,10 @@ Statistics simulatePriorityBased(int numProcesses, double arrivalRate, double se
     auto firstProcess = new Process(0, 0, inversePoisson(1 / serviceTime));
     processes.push_back(firstProcess);
     eventQueue.scheduleEvent(clock, firstProcess, ARRIVAL);
+
+    // Schedule first timeout event for round robin (if quantumLength isn't negative or 0)
+    if (quantumLength >= 0)
+        eventQueue.scheduleEvent(clock + quantumLength, nullptr, TIMEOUT);
 
     // Schedule first query event
     eventQueue.scheduleEvent(clock + queryInterval, nullptr, QUERY);
@@ -204,10 +107,12 @@ Statistics simulatePriorityBased(int numProcesses, double arrivalRate, double se
             else {
                 // Add arriving process to ready queue and update statistics
                 readyQueue.add(current.process);
+                if (dynamicPriority)
+                    readyQueue.updateWaitTimes(clock);
 
-                if (preemptive) {
+                if (doPreemption) {
                     onCpu->setServiceTimeLeft(onCpu->getServiceTimeLeft() - (clock - onCpu->getLastTimeAssignedCpu()));
-                    updateWaitTimes(&readyQueue, clock);
+                    readyQueue.updateWaitTimes(clock);
 
                     Process* candidate = readyQueue.getFront();
                     if (PriorityComparator()(candidate, onCpu)) {
@@ -247,19 +152,35 @@ Statistics simulatePriorityBased(int numProcesses, double arrivalRate, double se
                 onCpu = nullptr;
                 lastCpuBusyTime = clock;
             }
-                // If ready queue is not empty, put next process from ready queue on CPU
-                // and schedule its tentative departure
+            // If ready queue is not empty, put next process from ready queue on CPU
+            // and schedule its tentative departure
             else {
                 // Update wait times and resort queue
                 if (dynamicPriority)
-                    updateWaitTimes(&readyQueue, clock);
+                    readyQueue.updateWaitTimes(clock);
 
                 Process* p = readyQueue.getFront();
                 p->setLastTimeAssignedCpu(clock);
                 onCpu = p;
-                cpuIdle = false;
                 eventQueue.scheduleEvent(clock + p->getServiceTimeLeft(), p, DEPARTURE);
             }
+        }
+        else if (current.type == TIMEOUT) {
+            if (cpuIdle) {
+                break;
+            }
+            else {
+                onCpu->setServiceTimeLeft(onCpu->getServiceTimeLeft() - (clock - onCpu->getLastTimeAssignedCpu()));
+                eventQueue.unscheduleDeparture(onCpu->getId());
+                readyQueue.add(onCpu);
+                if (dynamicPriority)
+                    readyQueue.updateWaitTimes(clock);
+                onCpu = readyQueue.getFront();
+                eventQueue.scheduleEvent(clock + onCpu->getServiceTimeLeft(), onCpu, DEPARTURE);
+                onCpu->setLastTimeAssignedCpu(clock);
+            }
+            // Schedule next timeout
+            eventQueue.scheduleEvent(clock + quantumLength, nullptr, TIMEOUT);
         }
         else if (current.type == QUERY) {
             totalInReadyQueue += readyQueue.size();
@@ -282,11 +203,6 @@ Statistics simulatePriorityBased(int numProcesses, double arrivalRate, double se
 
     return {avgTurnaroundTime, throughput, avgCpuUtil, avgReadyQueueSize};
 
-
-}
-
-Statistics simulateRR(int numProcesses, double arrivalRate, double serviceTime, double quantumLength, double queryInterval) {
-    return {};
 }
 
 void runAllSimulations() {
@@ -301,11 +217,12 @@ void runAllSimulations() {
     Statistics s {};
     ofstream csvOut;
 
+/*
     // FCFS
     csvOut.open("FCFS.csv");
     for (double arrivalRate : arrivalRates) {
         cout << "\rSimulating FCFS..." << arrivalRate << "/" << arrivalRates[arrivalRates.size() - 1] << std::flush;
-        s = simulatePriorityBased<FCFSPriorityComparator>(numProcesses, arrivalRate, serviceTime,
+        s = simulatePriorityBased<FCFSPriorityComparator>(numProcesses, arrivalRate, serviceTime, 0,
                                                                        queryInterval, false, false);
         csvOut << arrivalRate << "," << s.avgTurnaroundTime << "," << s.throughput << "," << s.avgCpuUtil
                << "," << s.avgReadyQueueSize << endl;
@@ -317,7 +234,7 @@ void runAllSimulations() {
     csvOut.open("SRTF.csv");
     for (double arrivalRate : arrivalRates) {
         cout << "\rSimulating SRTF..." << arrivalRate << "/" << arrivalRates[arrivalRates.size() - 1] << std::flush;
-        s = simulatePriorityBased<SRTFPriorityComparator>(numProcesses, arrivalRate, serviceTime,
+        s = simulatePriorityBased<SRTFPriorityComparator>(numProcesses, arrivalRate, serviceTime, 0,
                                                           queryInterval, true, false);
         csvOut << arrivalRate << "," << s.avgTurnaroundTime << "," << s.throughput << "," << s.avgCpuUtil
                << "," << s.avgReadyQueueSize << endl;
@@ -329,36 +246,36 @@ void runAllSimulations() {
     csvOut.open("HRRN.csv");
     for (double arrivalRate : arrivalRates) {
         cout << "\rSimulating HRRN..." << arrivalRate << "/" << arrivalRates[arrivalRates.size() - 1] << std::flush;
-        s = simulatePriorityBased<HRRNPriorityComparator>(numProcesses, arrivalRate, serviceTime,
-                                                                       queryInterval, false, true);
+        s = simulatePriorityBased<HRRNPriorityComparator>(numProcesses, arrivalRate, serviceTime, 0,
+                                                          queryInterval, false, true);
         csvOut << arrivalRate << "," << s.avgTurnaroundTime << "," << s.throughput << "," << s.avgCpuUtil
                << "," << s.avgReadyQueueSize << endl;
     }
     csvOut.close();
     cout << "\rSimulating HRRN...done" << endl;
+*/
 
-/*
     // RR
     double quantums[] {0.01, 0.2};
     for (auto quantum : quantums) {
-        csvOut.open("RR.csv");
+        csvOut.open("RR(" + to_string(quantum) + ").csv");
         for (double arrivalRate : arrivalRates) {
             cout << "\rSimulating RR(" << quantum << ")..." << arrivalRate << "/" << arrivalRates[arrivalRates.size() - 1] << std::flush;
-            s = simulateRR(numProcesses, arrivalRate, serviceTime, quantum, queryInterval);
+            s = simulatePriorityBased<FCFSPriorityComparator>(numProcesses, arrivalRate, serviceTime, quantum,
+                                                              queryInterval, false, false);
             csvOut << arrivalRate << "," << s.avgTurnaroundTime << "," << s.throughput << "," << s.avgCpuUtil
                    << "," << s.avgReadyQueueSize << endl;
         }
         csvOut.close();
         cout << "\rSimulating RR" << quantum << "...done" << endl;
     }
-*/
 
     cout << "Finished all simulations." << endl;
 }
 
 int main(int argc, char* argv[]) {
-    srand((uint) time(nullptr));
-//    srand(2);
+//    srand((uint) time(nullptr));
+    srand(2);
 
     int numProcesses = 10000;
     double queryInterval = 0.01;
@@ -377,22 +294,22 @@ int main(int argc, char* argv[]) {
 
         Statistics s {};
 
-/*
         switch (scheduler) {
             case 1:
-                s = simulateNonPreemptivePriorityBased<FCFSPriorityComparator>(numProcesses, arrivalRate, serviceTime,
-                                                                               queryInterval, false);
+                s = simulatePriorityBased<FCFSPriorityComparator>(numProcesses, arrivalRate, serviceTime, 0,
+                                                                  queryInterval, false, false);
                 break;
             case 2:
-                s = simulatePriorityBased<SRTFPriorityComparator>(numProcesses, arrivalRate, serviceTime,
-                                                                  queryInterval);
+                s = simulatePriorityBased<SRTFPriorityComparator>(numProcesses, arrivalRate, serviceTime, 0,
+                                                                  queryInterval, true, false);
                 break;
             case 3:
-                s = simulateNonPreemptivePriorityBased<HRRNPriorityComparator>(numProcesses, arrivalRate, serviceTime,
-                                                                               queryInterval, true);
+                s = simulatePriorityBased<HRRNPriorityComparator>(numProcesses, arrivalRate, serviceTime, 0,
+                                                                  queryInterval, false, true);
                 break;
             case 4:
-                s = simulateRR(numProcesses, arrivalRate, serviceTime, quantumLength, queryInterval);
+                s = simulatePriorityBased<FCFSPriorityComparator>(numProcesses, arrivalRate, serviceTime, quantumLength,
+                                                                  queryInterval, false, false);
                 break;
             default:
                 break;
@@ -401,7 +318,6 @@ int main(int argc, char* argv[]) {
         s.display();
 
         return 0;
-*/
 
     } else return 1;
 
