@@ -1,3 +1,8 @@
+/**
+ * @author zachstence / zms22
+ * @since 3/24/2019
+ */
+
 #include <iostream>
 #include <fstream>
 #include <random>
@@ -114,33 +119,34 @@ Statistics simulatePriorityBased(int numProcesses, double arrivalRate, double se
 
         // Get next event and update clock
         Event current = eventQueue.getEvent();
-        clock = current.time;
+        clock = current.getTime();
 
         // If event is an arrival
-        if (current.type == ARRIVAL) {
+        if (current.getType() == ARRIVAL) {
             // If CPU is idle
             if (cpuIdle) {
                 // Set CPU to busy and update idle time
                 cpuIdle = false;
                 cpuIdleTime += clock - lastCpuBusyTime;
                 // Assign arriving process to CPU
-                current.process->setLastTimeAssignedCpu(clock);
-                onCpu = current.process;
+                current.getProcess()->setLastTimeAssignedCpu(clock);
+                onCpu = current.getProcess();
                 // Schedule arriving process' tentative departure (may be unscheduled later due to preemption or timeout)
-                eventQueue.scheduleEvent(clock + current.process->getServiceTimeLeft(), current.process, DEPARTURE);
+                eventQueue.scheduleEvent(clock + current.getProcess()->getServiceTimeLeft(), current.getProcess(), DEPARTURE);
             }
             // If CPU is busy
             else {
                 // Add arriving process to the ready queue
-                readyQueue.add(current.process);
-                // If dynamic priority scheme, update statistics
-                if (dynamicPriority)
+                readyQueue.add(current.getProcess());
+                // If dynamic priority scheme, update statistics and resort ready queue
+                if (dynamicPriority) {
                     readyQueue.updateWaitTimes(clock);
+                    readyQueue.sort();
+                }
 
                 // If doing preemption, update onCpu's statistics
                 if (doPreemption) {
                     onCpu->setServiceTimeLeft(onCpu->getServiceTimeLeft() - (clock - onCpu->getLastTimeAssignedCpu()));
-                    readyQueue.updateWaitTimes(clock);
 
                     Process* candidate = readyQueue.getFront();
                     // Compare process currently on CPU with highest priority from the ready queue,
@@ -166,18 +172,18 @@ Statistics simulatePriorityBased(int numProcesses, double arrivalRate, double se
             }
 
             // Schedule next process arrival
-            int nextId = current.process->getId() + 1;
+            int nextId = current.getProcess()->getId() + 1;
             double nextArrivalTime = clock + inversePoisson(arrivalRate);
             auto nextArrival = new Process(nextId, nextArrivalTime, inversePoisson(1 / serviceTime));
             processes.push_back(nextArrival);
             eventQueue.scheduleEvent(nextArrivalTime, nextArrival, ARRIVAL);
         }
         // If event is a departure
-        else if (current.type == DEPARTURE) {
+        else if (current.getType() == DEPARTURE) {
             // Increment number of processes simulated at each departure
             processesSimulated++;
             // Update completion time of departing process
-            current.process->setCompletionTime(clock);
+            current.getProcess()->setCompletionTime(clock);
 
             // If ready queue is empty, set CPU to idle and update statistics
             if (readyQueue.empty()) {
@@ -187,9 +193,11 @@ Statistics simulatePriorityBased(int numProcesses, double arrivalRate, double se
             }
             // If ready queue is not empty, put next process from ready queue on CPU and schedule its tentative departure
             else {
-                // If dynamic priority scheme, update statistics
-                if (dynamicPriority)
+                // If dynamic priority scheme, update statistics and resort ready queue
+                if (dynamicPriority) {
                     readyQueue.updateWaitTimes(clock);
+                    readyQueue.sort();
+                }
 
                 // Assign front of ready queue to CPU
                 Process* p = readyQueue.getFront();
@@ -199,7 +207,7 @@ Statistics simulatePriorityBased(int numProcesses, double arrivalRate, double se
             }
         }
         // If event is a timeout (round robin only)
-        else if (current.type == TIMEOUT) {
+        else if (current.getType() == TIMEOUT) {
             // If the CPU is idle, do nothing
             if (cpuIdle);
             // If CPU is busy, switch to process at the front of the ready queue
@@ -209,9 +217,11 @@ Statistics simulatePriorityBased(int numProcesses, double arrivalRate, double se
                 eventQueue.unscheduleDeparture(onCpu->getId());
                 readyQueue.add(onCpu);
 
-                // If dynamic priority scheme, update statistics
-                if (dynamicPriority)
+                // If dynamic priority scheme, update statistics and resort ready queue
+                if (dynamicPriority) {
                     readyQueue.updateWaitTimes(clock);
+                    readyQueue.sort();
+                }
 
                 // Assign front of ready queue to CPU, schedule tentative departure, and update last time assigned CPU
                 onCpu = readyQueue.getFront();
@@ -222,7 +232,7 @@ Statistics simulatePriorityBased(int numProcesses, double arrivalRate, double se
             eventQueue.scheduleEvent(clock + quantumLength, nullptr, TIMEOUT);
         }
         // If event is a query (updating statistics)
-        else if (current.type == QUERY) {
+        else if (current.getType() == QUERY) {
             // Update statistics
             totalInReadyQueue += readyQueue.size();
             // Schedule next query event
