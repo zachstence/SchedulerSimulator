@@ -17,7 +17,6 @@ template <class PriorityComparator>
 class ReadyQueue {
 private:
     set<Process*, PriorityComparator> processes;
-//    list<Process*> processes;
 
 public:
 

@@ -20,7 +20,10 @@ struct Event {
     EventType type;
 
     bool operator<(const Event& other) const {
-        return this->time < other.time;
+        if (this->time != other.time)
+            return this->time < other.time;
+        else
+            return this->type < other.type;
     }
 };
 

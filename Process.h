@@ -30,13 +30,6 @@ public:
         this->completionTime = -1;
     }
 
-    void decreaseServiceTimeLeft(double amount) {
-        this->serviceTimeLeft -= amount;
-        // TODO remove later?
-        if (this->serviceTimeLeft < 0)
-            printf("Scheduling error! Process %d used more CPU than needed!\n", this->id);
-    }
-
     int getId() { return this->id; }
 
     double getArrivalTime() { return this->arrivalTime; }
