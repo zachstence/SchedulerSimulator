@@ -52,3 +52,6 @@ for a different iteration. These files can then easily be imported into a spread
 ## Report
 I have written a [short report](report.pdf) detailing my observations based on the output of my code and the graphs I 
 have generated.
+
+------------------------------
+Zach Stence, 3/29/2019
