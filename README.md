@@ -3,7 +3,7 @@ A C++ program that simulates various CPU scheduling algorithms. This project was
 Operating Systems class at Texas State University. I have included the assignment sheet on the repository, and plan on
 adding more features to my code in the future as a fun exercise.
 
-## Installation
+## Downloading
 Simply clone my GitHub repository and you have all the code ready to go. No extra requirements to install.
 
 `git clone https://github.com/zachstence/SchedulerSimulator`
@@ -13,7 +13,7 @@ First, compile the main class
 
 `$ g++ main.cpp`
 
-#### One at a time
+#### One scheduler at a time
 To simulate one scheduling algorithm with a specified arrival rate, service time and quantum length (only used in RR),
 run the following command, choosing from the following algorithms
 1. First Come First Serve (FCFS)
@@ -32,7 +32,7 @@ $ ./a.out 2 10 0.06 0.01
   Avg. in Ready Queue :  0.344
 ```
 
-#### All with CSV results
+#### All schedulers with results saved
 To simulate all the scheduling algorithms with arrival rates from 1-30 processes/second, a service time of 0.06 seconds,
 and quantum lengths of 0.01 and 0.2 seconds (for round robin), simply provide '-1' as the scheduler choice
 ```bash
@@ -49,3 +49,6 @@ The results will be saved in 5 CSV files, each named for its corresponding sched
 for a different iteration. These files can then easily be imported into a spreadsheet application to make 
 [graphs](graphs/) like I have included on this repo.
 
+## Report
+I have wrriten a [short report](report.pdf) detailing my observations based on the output of my code and the graphs I 
+have genereated.
