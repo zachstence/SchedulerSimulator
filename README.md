@@ -47,10 +47,10 @@ Finished all simulations.
 The results will be saved in 5 CSV files, each named for its corresponding scheduler. The CSV files have 4 columns
 (arrival rate, average turnaround time, throughput, and average processes in the ready queue), each holding values 
 for a different iteration. These files can then easily be imported into a spreadsheet application to make 
-[graphs](graphs/) from the CSV [results](results/) like I have included on this repo.
+[graphs](results/graphs/) from the CSV [results](results/) like I have included on this repo.
 
 ## Report
-I have written a [short report](report.pdf) detailing my observations based on the output of my code and the graphs I 
+I have written a [short report](results/report.pdf) detailing my observations based on the output of my code and the graphs I 
 have generated.
 
 ------------------------------
