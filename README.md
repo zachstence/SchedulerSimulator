@@ -6,7 +6,7 @@ adding more features to my code in the future as a fun exercise.
 ## Downloading
 Simply clone my GitHub repository and you have all the code ready to go. No extra requirements to install.
 
-`git clone https://github.com/zachstence/SchedulerSimulator`
+`$ git clone https://github.com/zachstence/SchedulerSimulator`
 
 ## Running Simulations
 First, compile the main class
